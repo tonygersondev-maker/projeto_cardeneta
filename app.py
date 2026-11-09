@@ -1,42 +1,34 @@
 import os
-import sqlite3
+import psycopg2
+from psycopg2.extras import DictCursor
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 
 app = Flask(__name__)
-
-
 app.secret_key = "chave_secreta_ficticia_para_o_mvp_ead"
-#Linha Adcionada
+
+# Link do Supabase
 URL_BANCO = "postgresql://postgres:Pimenta@1945@://supabase.com"
-DATABASE = 'caderneta.db'
 
-def obter_conexao_banco():
-    """Abre a conexão e ativa o Modo WAL para máxima velocidade na nuvem."""
-    conexao = sqlite3.connect(DATABASE)
-    conexao.row_factory = sqlite3.Row
-    
-    # OTIMIZAÇÕES DE DESEMPENHO (RNF03):
-    conexao.execute("PRAGMA foreign_keys = ON;")
-    conexao.execute("PRAGMA journal_mode = WAL;")  # Gravação veloz em memória RAM
-    conexao.execute("PRAGMA synchronous = NORMAL;") # Evita travar o disco a cada clique
-    return conexao
+# CONEXÃO GLOBAL PERSISTENTE: Abre uma única vez para o app inteiro ficar rápido
+try:
+    conexao_global = psycopg2.connect(URL_BANCO, cursor_factory=DictCursor)
+    conexao_global.autocommit = True
+    print("Conexão persistente com o Supabase estabelecida com sucesso!")
+except Exception as e:
+    print(f"Erro crítico ao conectar no banco: {e}")
+    conexao_global = None
 
-def inicializar_sistema():
-    if not os.path.exists(DATABASE):
-        try:
-            conexao = obter_conexao_banco()
-            with open('schema.sql', 'r', encoding='utf-8') as f:
-                conexao.executescript(f.read())
-            
-            # Garante a criação de índices extras para acelerar as buscas no balcão
-            conexao.execute("CREATE INDEX IF NOT EXISTS idx_clientes_nome ON clientes(nome);")
-            conexao.execute("CREATE INDEX IF NOT EXISTS idx_lancamentos_cliente ON lancamentos(id_cliente);")
-            
-            conexao.commit()
-            conexao.close()
-            print("Banco de dados otimizado e inicializado com sucesso!")
-        except Exception as e:
-            print(f"Erro ao inicializar o banco: {e}")
+def obter_cursor_seguro():
+    """Garante que o cursor funcione mesmo se a conexão oscilar."""
+    global conexao_global
+    try:
+        # Testa se a conexão ainda está viva
+        conexao_global.isolation_level
+    except (psycopg2.OperationalError, AttributeError):
+        # Se caiu, refaz na hora
+        conexao_global = psycopg2.connect(URL_BANCO, cursor_factory=DictCursor)
+        conexao_global.autocommit = True
+    return conexao_global.cursor()
 
 def usuario_autenticado():
     return 'usuario_id' in session
@@ -50,14 +42,16 @@ def rota_login():
 @app.route('/autenticar', methods=['POST'])
 def autenticar():
     login = request.form.get('login')
-    conexao = obter_conexao_banco()
-    usuario = conexao.execute("SELECT * FROM usuarios WHERE login = ?", (login,)).fetchone()
-    conexao.close()
+    cursor = obter_cursor_seguro()
+    cursor.execute("SELECT * FROM usuarios WHERE login = %s", (login,))
+    usuario = cursor.fetchone()
+    cursor.close()
+    
     if usuario and login == "antonio_mercado":
         session['usuario_id'] = usuario['id_usuario']
         session['usuario_login'] = usuario['login']
         return redirect(url_for('painel_saldos'))
-    flash("Usuário ou senha inválidos. Tente novamente.", "erro")
+    flash("Usuário ou senha inválidos.", "erro")
     return redirect(url_for('rota_login'))
 
 @app.route('/logout')
@@ -69,9 +63,10 @@ def logout():
 def painel_saldos():
     if not usuario_autenticado():
         return redirect(url_for('rota_login'))
-    conexao = obter_conexao_banco()
-    lista_clientes = conexao.execute("SELECT * FROM clientes ORDER BY nome ASC").fetchall()
-    conexao.close()
+    cursor = obter_cursor_seguro()
+    cursor.execute("SELECT * FROM clientes ORDER BY nome ASC")
+    lista_clientes = cursor.fetchall()
+    cursor.close()
     return render_template('painel.html', clientes=lista_clientes)
 
 @app.route('/cadastrar_cliente', methods=['GET'])
@@ -91,35 +86,26 @@ def salvar_cliente():
     except ValueError:
         flash("Limite de crédito inválido.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
-    if not nome or not telefone:
-        flash("Nome e Telefone são obrigatórios.", "erro")
-        return redirect(url_for('tela_cadastro_cliente'))
-    if limite < 0:
-        flash("O limite não pode ser menor que zero.", "erro")
-        return redirect(url_for('tela_cadastro_cliente'))
 
-    conexao = obter_conexao_banco()
+    cursor = obter_cursor_seguro()
     try:
-        conexao.execute("INSERT INTO clientes (nome, telefone, limite_credito, saldo_devedor) VALUES (?, ?, ?, 0.00)", (nome, telefone, limite))
-        conexao.commit()
+        cursor.execute("INSERT INTO clientes (nome, telefone, limite_credito, saldo_devedor) VALUES (%s, %s, %s, 0.00)", (nome, telefone, limite))
         flash(f"Cliente {nome} cadastrado com sucesso!", "sucesso")
         return redirect(url_for('painel_saldos'))
-    except sqlite3.IntegrityError:
+    except Exception:
         flash("Erro: Telefone já cadastrado.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
     finally:
-        conexao.close()
+        cursor.close()
 
 @app.route('/transacao/<int:id_cliente>', methods=['GET'])
 def tela_transacao(id_cliente):
     if not usuario_autenticado():
         return redirect(url_for('rota_login'))
-    conexao = obter_conexao_banco()
-    cliente = conexao.execute("SELECT * FROM clientes WHERE id_cliente = ?", (id_cliente,)).fetchone()
-    conexao.close()
-    if not cliente:
-        flash("Cliente não encontrado.", "erro")
-        return redirect(url_for('painel_saldos'))
+    cursor = obter_cursor_seguro()
+    cursor.execute("SELECT * FROM clientes WHERE id_cliente = %s", (id_cliente,))
+    cliente = cursor.fetchone()
+    cursor.close()
     return render_template('transacao.html', cliente=cliente)
 
 @app.route('/processar_transacao/<int:id_cliente>', methods=['POST'])
@@ -133,39 +119,27 @@ def processar_transacao(id_cliente):
     except ValueError:
         flash("Valor inválido.", "erro")
         return redirect(url_for('tela_transacao', id_cliente=id_cliente))
-    if valor <= 0:
-        flash("O valor deve ser maior que zero.", "erro")
-        return redirect(url_for('tela_transacao', id_cliente=id_cliente))
 
-    conexao = obter_conexao_banco()
-    cliente = conexao.execute("SELECT * FROM clientes WHERE id_cliente = ?", (id_cliente,)).fetchone()
-    if not cliente:
-        conexao.close()
-        flash("Cliente inválido.", "erro")
-        return redirect(url_for('painel_saldos'))
+    cursor = obter_cursor_seguro()
+    cursor.execute("SELECT * FROM clientes WHERE id_cliente = %s", (id_cliente,))
+    cliente = cursor.fetchone()
 
     if tipo == 'DEBITO':
-        novo_saldo = cliente['saldo_devedor'] + valor
-        if novo_saldo > cliente['limite_credito']:
-            conexao.close()
-            flash(f"Operação Bloqueada: {cliente['nome']} excedeu o limite de crédito! (Limite: R$ {cliente['limite_credito']:.2f})", "bloqueio")
+        novo_saldo = float(cliente['saldo_devedor']) + valor
+        if novo_saldo > float(cliente['limite_credito']):
+            cursor.close()
+            flash(f"Operação Bloqueada: Limite excedido!", "bloqueio")
             return redirect(url_for('tela_transacao', id_cliente=id_cliente))
-        conexao.execute("INSERT INTO lancamentos (id_cliente, tipo_transacao, valor, descricao) VALUES (?, ?, ?, ?)", (id_cliente, 'DEBITO', valor, descricao))
-        conexao.execute("UPDATE clientes SET saldo_devedor = ? WHERE id_cliente = ?", (novo_saldo, id_cliente))
-        flash(f"Compra de R$ {valor:.2f} registrada com sucesso.", "sucesso")
+        cursor.execute("INSERT INTO lancamentos (id_cliente, tipo_transacao, valor, descricao) VALUES (%s, %s, %s, %s)", (id_cliente, 'DEBITO', valor, descricao))
+        cursor.execute("UPDATE clientes SET saldo_devedor = %s WHERE id_cliente = %s", (novo_saldo, id_cliente))
     elif tipo == 'CREDITO':
-        novo_saldo = max(0.0, cliente['saldo_devedor'] - valor)
-        conexao.execute("INSERT INTO lancamentos (id_cliente, tipo_transacao, valor, descricao) VALUES (?, ?, ?, ?)", (id_cliente, 'CREDITO', valor, descricao))
-        conexao.execute("UPDATE clientes SET saldo_devedor = ? WHERE id_cliente = ?", (novo_saldo, id_cliente))
-        flash(f"Pagamento de R$ {valor:.2f} recebido com sucesso.", "sucesso")
-    conexao.commit()
-    conexao.close()
+        novo_saldo = max(0.0, float(cliente['saldo_devedor']) - valor)
+        cursor.execute("INSERT INTO lancamentos (id_cliente, tipo_transacao, valor, descricao) VALUES (%s, %s, %s, %s)", (id_cliente, 'CREDITO', valor, descricao))
+        cursor.execute("UPDATE clientes SET saldo_devedor = %s WHERE id_cliente = %s", (novo_saldo, id_cliente))
+        
+    cursor.close()
+    flash("Transação registrada com sucesso!", "sucesso")
     return redirect(url_for('painel_saldos'))
 
-@app.errorhandler(500)
-def erro_interno(e):
-    return "Erro interno no servidor. Operação abortada por segurança.", 500
-
 if __name__ == '__main__':
-    inicializar_sistema()
     app.run(host='0.0.0.0', port=5000, debug=False)
