@@ -3,7 +3,11 @@ import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 
 app = Flask(__name__)
+
+
 app.secret_key = "chave_secreta_ficticia_para_o_mvp_ead"
+#Linha Adcionada
+URL_BANCO = "postgresql://postgres:Pimenta@1945@://supabase.com"
 DATABASE = 'caderneta.db'
 
 def obter_conexao_banco():
