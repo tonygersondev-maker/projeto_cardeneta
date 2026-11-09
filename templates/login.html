@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - CadernetaDigital</title>
+    <link href="https://jsdelivr.net" rel="stylesheet">
+</head>
+<body style="background-color: #f4f6f9; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; box-sizing: border-box;">
+
+    <div style="background: white; width: 100%; max-width: 400px; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); box-sizing: border-box;">
+        <h1 style="font-size: 28px; font-weight: 800; color: #1e293b; text-align: center; margin: 0 0 5px 0;">CadernetaDigital</h1>
+        <p style="font-size: 14px; color: #64748b; text-align: center; margin: 0 0 25px 0;">Controle de fiado rápido para o balcão</p>
+
+        {% with messages = get_flashed_messages(category_filter=["erro"]) %}
+            {% if messages %}{% for msg in messages %}
+                <div style="background-color: #fee2e2; color: #dc2626; padding: 12px; border-radius: 6px; font-size: 14px; font-weight: 600; margin-bottom: 20px; border-left: 4px solid #dc2626;">
+                    ⚠️ {{ msg }}
+                </div>
+            {% endfor %}{% endif %}
+        {% endwith %}
+
+        <form action="{{ url_for('autenticar') }}" method="POST">
+            <div style="margin-bottom: 18px;">
+                <label for="login" style="display: block; font-weight: 700; color: #334155; margin-bottom: 8px; font-size: 15px;">Usuário:</label>
+                <input type="text" name="login" id="login" style="width: 100%; min-height: 48px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 16px; box-sizing: border-box; background-color: #f8fafc;" required placeholder="antonio_mercado">
+            </div>
+            <div style="margin-bottom: 25px;">
+                <label for="senha" style="display: block; font-weight: 700; color: #334155; margin-bottom: 8px; font-size: 15px;">Senha:</label>
+                <input type="password" name="senha" id="senha" style="width: 100%; min-height: 48px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 16px; box-sizing: border-box; background-color: #f8fafc;" required>
+            </div>
+            <button type="submit" style="width: 100%; min-height: 48px; background-color: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; cursor: pointer; transition: background 0.2s; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">ENTRAR NO SISTEMA</button>
+        </form>
+    </div>
+
+</body>
+</html>
