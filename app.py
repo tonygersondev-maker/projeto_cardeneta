@@ -7,9 +7,14 @@ app.secret_key = "chave_secreta_ficticia_para_o_mvp_ead"
 DATABASE = 'caderneta.db'
 
 def obter_conexao_banco():
+    """Abre a conexão e ativa o Modo WAL para máxima velocidade na nuvem."""
     conexao = sqlite3.connect(DATABASE)
     conexao.row_factory = sqlite3.Row
+    
+    # OTIMIZAÇÕES DE DESEMPENHO (RNF03):
     conexao.execute("PRAGMA foreign_keys = ON;")
+    conexao.execute("PRAGMA journal_mode = WAL;")  # Gravação veloz em memória RAM
+    conexao.execute("PRAGMA synchronous = NORMAL;") # Evita travar o disco a cada clique
     return conexao
 
 def inicializar_sistema():
@@ -18,9 +23,14 @@ def inicializar_sistema():
             conexao = obter_conexao_banco()
             with open('schema.sql', 'r', encoding='utf-8') as f:
                 conexao.executescript(f.read())
+            
+            # Garante a criação de índices extras para acelerar as buscas no balcão
+            conexao.execute("CREATE INDEX IF NOT EXISTS idx_clientes_nome ON clientes(nome);")
+            conexao.execute("CREATE INDEX IF NOT EXISTS idx_lancamentos_cliente ON lancamentos(id_cliente);")
+            
             conexao.commit()
             conexao.close()
-            print("Banco de dados inicializado com sucesso!")
+            print("Banco de dados otimizado e inicializado com sucesso!")
         except Exception as e:
             print(f"Erro ao inicializar o banco: {e}")
 
@@ -36,7 +46,6 @@ def rota_login():
 @app.route('/autenticar', methods=['POST'])
 def autenticar():
     login = request.form.get('login')
-    senha = request.form.get('senha')
     conexao = obter_conexao_banco()
     usuario = conexao.execute("SELECT * FROM usuarios WHERE login = ?", (login,)).fetchone()
     conexao.close()
@@ -61,54 +70,41 @@ def painel_saldos():
     conexao.close()
     return render_template('painel.html', clientes=lista_clientes)
 
-# --- NOVAS ROTAS PARA CADASTRO DE CLIENTES (RF01) ---
-
 @app.route('/cadastrar_cliente', methods=['GET'])
 def tela_cadastro_cliente():
-    """Exibe o formulário de cadastro de novo cliente."""
     if not usuario_autenticado():
         return redirect(url_for('rota_login'))
     return render_template('cadastro_cliente.html')
 
 @app.route('/salvar_cliente', methods=['POST'])
 def salvar_cliente():
-    """Processa a validação e insere o novo cliente no SQLite."""
     if not usuario_autenticado():
         return redirect(url_for('rota_login'))
-    
     nome = request.form.get('nome', '').strip()
     telefone = request.form.get('telefone', '').strip()
-    
     try:
         limite = float(request.form.get('limite_credito', 0))
     except ValueError:
         flash("Limite de crédito inválido.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
-
     if not nome or not telefone:
-        flash("Nome e Telefone são campos obrigatórios.", "erro")
+        flash("Nome e Telefone são obrigatórios.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
-        
     if limite < 0:
-        flash("O limite de crédito não pode ser menor que zero.", "erro")
+        flash("O limite não pode ser menor que zero.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
 
     conexao = obter_conexao_banco()
     try:
-        # RNF02: Consulta parametrizada com '?' para proteção contra SQL Injection
-        conexao.execute("INSERT INTO clientes (nome, telefone, limite_credito, saldo_devedor) VALUES (?, ?, ?, 0.00)",
-                        (nome, telefone, limite))
+        conexao.execute("INSERT INTO clientes (nome, telefone, limite_credito, saldo_devedor) VALUES (?, ?, ?, 0.00)", (nome, telefone, limite))
         conexao.commit()
         flash(f"Cliente {nome} cadastrado com sucesso!", "sucesso")
         return redirect(url_for('painel_saldos'))
     except sqlite3.IntegrityError:
-        # Captura se o telefone já existir (Garante a restrição de unicidade que definimos)
-        flash("Erro: Este número de telefone já está cadastrado em outro cliente.", "erro")
+        flash("Erro: Telefone já cadastrado.", "erro")
         return redirect(url_for('tela_cadastro_cliente'))
     finally:
         conexao.close()
-
-# ---------------------------------------------------
 
 @app.route('/transacao/<int:id_cliente>', methods=['GET'])
 def tela_transacao(id_cliente):
