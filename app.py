@@ -122,3 +122,5 @@ def transacao(id):
     cli = cursor.fetchone()
     cursor.close()
     return render_template('transacao.html', cliente=cli)
+
+# revisao final do codigo para entrega
