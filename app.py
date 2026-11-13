@@ -123,4 +123,4 @@ def transacao(id):
     cursor.close()
     return render_template('transacao.html', cliente=cli)
 
-# revisao final do codigo para  entrega
+# revisao final do codigo para entrega 
