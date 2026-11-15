@@ -22,7 +22,7 @@ def pegar_cursor():
     try:
         conexao_global.isolation_level
     except:
-        conexao_global = psycopg2.connect(URL_BANCO, cursor_factory=DictCursor)
+         conexao_global = psycopg2.connect(URL_BANCO, cursor_factory=DictCursor)
         conexao_global.autocommit = True
     return conexao_global.cursor()
 
@@ -122,3 +122,4 @@ def transacao(id):
     cli = cursor.fetchone()
     cursor.close()
     return render_template('transacao.html', cliente=cli)
+ #REVISAO FINAL
