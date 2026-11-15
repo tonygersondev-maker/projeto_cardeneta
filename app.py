@@ -122,4 +122,4 @@ def transacao(id):
     cli = cursor.fetchone()
     cursor.close()
     return render_template('transacao.html', cliente=cli)
- #REVISAO FINAL
+# revisao final
